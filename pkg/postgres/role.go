@@ -19,13 +19,33 @@ const (
 	REASIGN_OBJECTS     = `REASSIGN OWNED BY "%s" TO "%s"`
 )
 
+func isPQError(err error, codes ...pq.ErrorCode) bool {
+	if err == nil {
+		return false
+	}
+
+	pgError, ok := err.(*pq.Error)
+	if ok {
+		if len(codes) == 0 {
+			// just checking if its a pgerror
+			return true
+		}
+		for _, code := range codes {
+			if pgError.Code == code {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func (c *pg) CreateGroupRole(role string) error {
 	// Error code 42710 is duplicate_object (role already exists)
 	_, err := c.db.Exec(fmt.Sprintf(CREATE_GROUP_ROLE, role))
-	if err != nil && err.(*pq.Error).Code != "42710" {
-		return err
+	if isPQError(err, "42710") {
+		return nil
 	}
-	return nil
+	return err
 }
 
 func (c *pg) CreateUserRole(role, password string) (string, error) {
@@ -64,7 +84,7 @@ func (c *pg) DropRole(role, newOwner, database string, logger logr.Logger) error
 	// REASSIGN OWNED BY only works if the correct database is selected
 	tmpDb, err := GetConnection(c.user, c.pass, c.host, c.port, database, c.args, logger)
 	if err != nil {
-		if err.(*pq.Error).Code == "3D000" {
+		if isPQError(err, "3D000") {
 			return nil // Database is does not exist (anymore)
 		} else {
 			return err
@@ -73,20 +93,20 @@ func (c *pg) DropRole(role, newOwner, database string, logger logr.Logger) error
 	_, err = tmpDb.Exec(fmt.Sprintf(REASIGN_OBJECTS, role, newOwner))
 	defer tmpDb.Close()
 	// Check if error exists and if different from "ROLE NOT FOUND" => 42704
-	if err != nil && err.(*pq.Error).Code != "42704" {
+	if err != nil && !isPQError(err, "42704") {
 		return err
 	}
 
 	// We previously assigned all objects to the operator's role so DROP OWNED BY will drop privileges of role
 	_, err = tmpDb.Exec(fmt.Sprintf(DROP_OWNED_BY, role))
 	// Check if error exists and if different from "ROLE NOT FOUND" => 42704
-	if err != nil && err.(*pq.Error).Code != "42704" {
+	if err != nil && !isPQError(err, "42704") {
 		return err
 	}
 
 	_, err = c.db.Exec(fmt.Sprintf(DROP_ROLE, role))
 	// Check if error exists and if different from "ROLE NOT FOUND" => 42704
-	if err != nil && err.(*pq.Error).Code != "42704" {
+	if err != nil && !isPQError(err, "42704") {
 		return err
 	}
 	return nil

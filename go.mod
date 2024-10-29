@@ -26,6 +26,7 @@ require (
 	github.com/Azure/go-autorest/autorest/date v0.2.0 // indirect
 	github.com/Azure/go-autorest/logger v0.1.0 // indirect
 	github.com/Azure/go-autorest/tracing v0.5.0 // indirect
+	github.com/DATA-DOG/go-sqlmock v1.5.2 // indirect
 	github.com/PuerkitoBio/purell v1.1.1 // indirect
 	github.com/PuerkitoBio/urlesc v0.0.0-20170810143723-de5bf2ad4578 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
