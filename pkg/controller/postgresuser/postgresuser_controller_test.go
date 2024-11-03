@@ -20,8 +20,9 @@ func assertEqual(t *testing.T, a interface{}, b interface{}) {
 
 func TestReconcilePostgresUser_newSecretForCR(t *testing.T) {
 	rpu := &ReconcilePostgresUser{
-		pgHost: "localhost",
-		pgPort: 5432,
+		pgHost:    "localhost",
+		pgPort:    5432,
+		pgUriArgs: "sslmode=disable",
 	}
 
 	cr := &dbv1alpha1.PostgresUser{
@@ -30,7 +31,9 @@ func TestReconcilePostgresUser_newSecretForCR(t *testing.T) {
 		},
 		Spec: dbv1alpha1.PostgresUserSpec{
 			SecretTemplate: map[string]string{
-				"all": "host={{.Host}} host_no_port={{.HostNoPort}} port={{.Port}} user={{.Role}} login={{.Login}} password={{.Password}} dbname={{.Database}}",
+				"all":                      "host={{.Host}} host_no_port={{.HostNoPort}} port={{.Port}} user={{.Role}} login={{.Login}} password={{.Password}} dbname={{.Database}}",
+				"uriArgsFilter":            `postgres://foobar?{{ "sslmode=no-verify" | mergeUriArgs }}`,
+				"uriArgsFilterEmptyString": `postgres://foobar?{{ "" | mergeUriArgs }}`,
 			},
 		},
 	}
@@ -46,5 +49,8 @@ func TestReconcilePostgresUser_newSecretForCR(t *testing.T) {
 
 	// keep old behavior of merging host and port
 	assertEqual(t, string(secret.Data["HOST"]), "localhost:5432")
+	assertEqual(t, string(secret.Data["URI_ARGS"]), "sslmode=disable")
 	assertEqual(t, string(secret.Data["all"]), "host=localhost:5432 host_no_port=localhost port=5432 user=role login=login password=password dbname=dbname")
+	assertEqual(t, string(secret.Data["uriArgsFilter"]), "postgres://foobar?sslmode=disable")
+	assertEqual(t, string(secret.Data["uriArgsFilterEmptyString"]), "postgres://foobar?sslmode=disable")
 }

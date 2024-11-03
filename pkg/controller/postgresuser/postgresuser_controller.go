@@ -5,15 +5,10 @@ import (
 	"context"
 	goerr "errors"
 	"fmt"
+	"net/url"
 	"text/template"
 
-	"github.com/movetokube/postgres-operator/pkg/config"
-
 	"github.com/go-logr/logr"
-	dbv1alpha1 "github.com/movetokube/postgres-operator/pkg/apis/db/v1alpha1"
-	"github.com/movetokube/postgres-operator/pkg/postgres"
-	"github.com/movetokube/postgres-operator/pkg/utils"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,6 +22,11 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 	"sigs.k8s.io/controller-runtime/pkg/source"
+
+	dbv1alpha1 "github.com/movetokube/postgres-operator/pkg/apis/db/v1alpha1"
+	"github.com/movetokube/postgres-operator/pkg/config"
+	"github.com/movetokube/postgres-operator/pkg/postgres"
+	"github.com/movetokube/postgres-operator/pkg/utils"
 )
 
 var log = logf.Log.WithName("controller_postgresuser")
@@ -55,6 +55,7 @@ func newReconciler(mgr manager.Manager) reconcile.Reconciler {
 		scheme:         mgr.GetScheme(),
 		pg:             pg,
 		pgHost:         c.PostgresHost,
+		pgUriArgs:      c.PostgresUriArgs,
 		pgPort:         c.PostgresPort,
 		instanceFilter: c.AnnotationFilter,
 		keepSecretName: c.KeepSecretName,
@@ -102,6 +103,7 @@ type ReconcilePostgresUser struct {
 	pg             postgres.PG
 	pgHost         string
 	pgPort         uint32
+	pgUriArgs      string
 	instanceFilter string
 	keepSecretName bool // use secret name as defined in PostgresUserSpec
 }
@@ -299,6 +301,7 @@ func (r *ReconcilePostgresUser) newSecretForCR(cr *dbv1alpha1.PostgresUser, role
 		Host:       fmt.Sprintf("%s:%d", r.pgHost, r.pgPort),
 		HostNoPort: r.pgHost,
 		Port:       r.pgPort,
+		UriArgs:    r.pgUriArgs,
 		Login:      login,
 		Database:   cr.Status.DatabaseName,
 		Password:   password,
@@ -312,6 +315,7 @@ func (r *ReconcilePostgresUser) newSecretForCR(cr *dbv1alpha1.PostgresUser, role
 		"POSTGRES_JDBC_URL":   []byte(pgJDBCUrl),
 		"POSTGRES_DOTNET_URL": []byte(pgDotnetUrl),
 		"HOST":                []byte(fmt.Sprintf("%s:%d", r.pgHost, r.pgPort)),
+		"URI_ARGS":            []byte(r.pgUriArgs),
 		"DATABASE_NAME":       []byte(cr.Status.DatabaseName),
 		"ROLE":                []byte(role),
 		"PASSWORD":            []byte(password),
@@ -393,6 +397,7 @@ type templateContext struct {
 	Login      string
 	Database   string
 	Password   string
+	UriArgs    string
 }
 
 func renderTemplate(data map[string]string, tc templateContext) (map[string][]byte, error) {
@@ -401,7 +406,27 @@ func renderTemplate(data map[string]string, tc templateContext) (map[string][]by
 	}
 	var out = make(map[string][]byte, len(data))
 	for key, templ := range data {
-		parsed, err := template.New("").Parse(templ)
+		tmplObj := template.New("")
+		tmplObj.Funcs(template.FuncMap{
+			"mergeUriArgs": func(uriArgs string) (string, error) {
+				inputArgs, err := url.ParseQuery(uriArgs)
+				if err != nil {
+					return uriArgs, fmt.Errorf("unable to parse input uri args: %w", err)
+				}
+
+				pgArgs, err := url.ParseQuery(tc.UriArgs)
+				if err != nil {
+					return uriArgs, fmt.Errorf("unable to parse pg uri args: %w", err)
+				}
+
+				for argName, values := range pgArgs {
+					inputArgs.Set(argName, values[0])
+				}
+
+				return inputArgs.Encode(), nil
+			},
+		})
+		parsed, err := tmplObj.Parse(templ)
 		if err != nil {
 			return nil, fmt.Errorf("parse template %q: %w", key, err)
 		}
